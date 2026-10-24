@@ -9,6 +9,7 @@ import {
   type ModelCard,
 } from './api'
 import { DecisionForm, type FormValues } from './DecisionForm'
+import { ModelSelect } from './ModelSelect'
 import { Result, type RunState } from './Result'
 import { ServerPanel } from './ServerPanel'
 import { useStored, type Selection } from './storage'
@@ -21,8 +22,6 @@ const EMPTY_FORM: FormValues = {
   candidates: ['', ''],
   criteria: { true: '', false: '' },
 }
-
-const host = (url: string) => url.replace(/^https?:\/\//, '')
 
 export default function App() {
   const [stored, setStored] = useStored()
@@ -198,32 +197,23 @@ export default function App() {
             <span className="product">Playground</span>
           </a>
           <nav aria-label="Model selection" className="model-nav">
-            <select
-              className="model-select"
-              aria-label="Model"
-              value={current ? `${current.serverId}::${current.model}` : ''}
-              disabled={!current}
-              onChange={(event) => {
-                const [serverId, model] = event.target.value.split('::')
+            <ModelSelect
+              options={servers.flatMap((server) => {
+                const state = states[server.id]
+                if (state?.status !== 'online') return []
+                return state.models.map((m) => ({
+                  value: `${server.id}::${m.name}`,
+                  name: m.display_name || m.name,
+                  url: server.url,
+                  ready: m.loaded,
+                }))
+              })}
+              value={current ? `${current.serverId}::${current.model}` : null}
+              onChange={(value) => {
+                const [serverId, model] = value.split('::')
                 setStored((prev) => ({ ...prev, selection: { serverId, model } }))
               }}
-            >
-              {!current && <option value="">No model available</option>}
-              {servers.map((server) => {
-                const state = states[server.id]
-                if (state?.status !== 'online') return null
-                return (
-                  <optgroup key={server.id} label={host(server.url)}>
-                    {state.models.map((m) => (
-                      <option key={m.name} value={`${server.id}::${m.name}`}>
-                        {m.display_name}
-                        {m.loaded ? ' · ready' : ''}
-                      </option>
-                    ))}
-                  </optgroup>
-                )
-              })}
-            </select>
+            />
             {card && (
               <span className="header-meta">
                 {card.scorer} · {card.calibratable ? 'calibrated' : 'uncalibrated'} · policy{' '}

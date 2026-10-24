@@ -127,19 +127,81 @@ textarea:focus-visible {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-/* the model selector: one mono field, no chrome, like the decision dials */
+/* the model picker: one mono field, no chrome, like the decision dials;
+   a custom listbox so each row can show the model name and its server URL */
+.model-picker {
+  position: relative;
+}
 .model-select {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 220px;
+  padding: 7px 12px;
   border: 1px solid var(--line-strong);
   background: var(--surface-raised);
   color: var(--peach);
   font: 11px var(--mono);
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  padding: 9px 12px;
-  min-width: 170px;
+  text-align: left;
+  cursor: pointer;
+}
+.model-select:disabled {
+  color: var(--quiet);
+  cursor: default;
 }
 .model-select:focus-visible {
   outline-offset: 2px;
+}
+.model-select .caret {
+  width: 13px;
+  height: 13px;
+  margin-left: auto;
+  flex: none;
+}
+.model-line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.model-line-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.model-line-url {
+  overflow: hidden;
+  color: var(--quiet);
+  font: 10px var(--mono);
+  letter-spacing: 0.02em;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+.model-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 320px;
+  max-width: calc(100vw - 48px);
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-raised);
+}
+.model-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.model-option.is-active {
+  background: var(--surface);
 }
 .hero {
   padding-block: 64px 40px;
