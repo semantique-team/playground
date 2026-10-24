@@ -14,6 +14,9 @@ This repository contains two independent processes:
 The model package and its checkpoint directories stay in the sibling `ant-4b`
 repository. This keeps the interface deployable without copying model weights.
 
+Public as a showcase, developed exclusively by the Semantique Team — not open to
+external contributions (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+
 ![Semantique Playground running ANT 4B: a support ticket routed to the billing team with calibrated probabilities and the execute/escalate verdict](docs/playground.png)
 
 ## Prerequisites
