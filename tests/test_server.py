@@ -141,3 +141,78 @@ def test_mock_checkpoints_are_refused_by_default():
 
 def test_no_page_is_served(client):
     assert client.get("/").status_code == 404
+
+
+def _typed_payload(**overrides):
+    body = {
+        "state": "The customer was charged twice for the same invoice and asks for a refund.",
+        "questions": {
+            "team": {
+                "type": "choice",
+                "instructions": "Which team should handle this ticket?",
+                "criteria": {"billing": "invoices and refunds", "technical": "bugs"},
+            },
+            "refund": {
+                "type": "noul",
+                "instructions": "Is the customer asking for money back?",
+            },
+            "urgency": {
+                "type": "score",
+                "instructions": "How urgent is this?",
+                "criteria": ["not urgent", "soon", "blocking"],
+            },
+        },
+    }
+    body.update(overrides)
+    return body
+
+
+def test_typed_answers_all_three_kinds(client):
+    response = client.post("/api/typed", json=_typed_payload())
+    assert response.status_code == 200
+    body = response.json()
+    assert body["model"] == "example"
+    assert body["latency_ms"] >= 0
+    answers = body["answers"]
+    assert set(answers) == {"team", "refund", "urgency"}
+
+    team = answers["team"]
+    assert team["type"] == "choice"
+    assert team["choice"] in {"billing", "technical"}
+    assert set(team["probabilities"]) == {"billing", "technical"}
+
+    refund = answers["refund"]
+    assert refund["type"] == "noul"
+    assert 0.0 <= refund["noul"] <= 1.0
+    assert set(refund["probabilities"]) == {"yes", "no"}
+
+    urgency = answers["urgency"]
+    assert urgency["type"] == "score"
+    assert 0.0 <= urgency["score"] <= 2.0
+    assert set(urgency["legend"].values()) == {"not urgent", "soon", "blocking"}
+    assert set(urgency["probabilities"]) == {"0", "1", "2"}
+
+
+def test_typed_reports_the_answering_model(client):
+    body = _typed_payload(model="mock-dot")
+    response = client.post("/api/typed", json=body)
+    assert response.status_code == 200
+    assert response.json()["model"] == "mock-dot"
+
+
+def test_typed_unknown_model_is_a_clean_404(client):
+    response = client.post("/api/typed", json=_typed_payload(model="does-not-exist"))
+    assert response.status_code == 404
+    assert "unknown model" in response.json()["detail"]
+
+
+def test_typed_malformed_question_is_a_422_naming_it(client):
+    body = _typed_payload()
+    body["questions"]["broken"] = {"type": "box", "instructions": "Find the logo"}
+    response = client.post("/api/typed", json=body)
+    assert response.status_code == 422
+    assert "broken" in response.json()["detail"]
+
+
+def test_typed_rejects_empty_questions(client):
+    assert client.post("/api/typed", json=_typed_payload(questions={})).status_code == 422

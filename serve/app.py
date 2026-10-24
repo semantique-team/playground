@@ -6,6 +6,8 @@ Endpoints:
     POST /api/decision  — state + question + candidates (+ optional model,
                           temperature) -> choice, probabilities, confidence,
                           execute/escalate.
+    POST /api/typed     — state + typed questions (choice/noul/score, System
+                          One style) -> one typed answer per question id.
     GET  /api/examples  — real held-out inputs shipped with a model (?model=name).
 
 This is a pure API; the Vite web interface in this repository can point at any
@@ -33,6 +35,7 @@ from ant.config import ANTConfig
 from ant.inference.cache import CandidateEmbeddingCache
 from ant.inference.escalation import AlwaysExecute
 from ant.inference.predictor import ANTPredictor
+from ant.inference.typed import TypedQuestionError, answer_questions
 from ant.types import PredictionResult
 
 _MAX_CANDIDATES = 100
@@ -209,6 +212,28 @@ class DecisionResponse(BaseModel):
     latency_ms: float
 
 
+class TypedRequest(BaseModel):
+    """System One style typed questions about one state.
+
+    Each question is ``{type, instructions, criteria}`` where type is one of
+    ``choice``, ``noul``, ``score``; see ``ant.inference.typed`` for the exact
+    criteria shapes and the answer layout.
+    """
+
+    state: str = Field(min_length=1, max_length=8000)
+    questions: dict[str, dict[str, Any]] = Field(min_length=1, max_length=64)
+    model: str | None = Field(default=None, description="Registry name; defaults to the first model")
+    temperature: float | None = Field(default=None, gt=0.0, le=20.0)
+
+
+class TypedResponse(BaseModel):
+    """One typed answer per question id, plus the model and total latency."""
+
+    answers: dict[str, dict[str, Any]]
+    model: str
+    latency_ms: float
+
+
 class ModelsResponse(BaseModel):
     models: list[dict[str, Any]]
 
@@ -298,6 +323,36 @@ def create_app(
         latency_ms = (time.perf_counter() - started) * 1000.0
         return DecisionResponse(
             result=result.to_dict(), model=model_name, latency_ms=round(latency_ms, 2)
+        )
+
+    @app.post("/api/typed", response_model=TypedResponse)
+    def typed(request: TypedRequest) -> TypedResponse:
+        model_name = request.model or registry.names()[0]
+        try:
+            predictor = registry.get(model_name)
+        except KeyError as error:
+            raise HTTPException(
+                status_code=404, detail=f"unknown model {model_name!r}; GET /api/models for the list"
+            ) from error
+        previous_temperature = predictor.temperature
+        if request.temperature is not None:
+            predictor.temperature = request.temperature
+        started = time.perf_counter()
+        try:
+            with torch.no_grad():
+                try:
+                    answers = answer_questions(predictor, request.state, request.questions)
+                except TypedQuestionError as error:
+                    raise HTTPException(status_code=422, detail=str(error)) from error
+                except Exception as error:
+                    raise HTTPException(
+                        status_code=500, detail=f"prediction failed: {error}"
+                    ) from error
+        finally:
+            predictor.temperature = previous_temperature
+        latency_ms = (time.perf_counter() - started) * 1000.0
+        return TypedResponse(
+            answers=answers, model=model_name, latency_ms=round(latency_ms, 2)
         )
 
     @app.get("/api/examples")

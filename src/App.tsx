@@ -1,12 +1,26 @@
 import { useEffect, useMemo, useState } from 'react'
-import { decide, listExamples, listModels, normalizeUrl, type DecisionExample, type ModelCard } from './api'
+import {
+  decide,
+  decideTyped,
+  listExamples,
+  listModels,
+  normalizeUrl,
+  type DecisionExample,
+  type ModelCard,
+} from './api'
 import { DecisionForm, type FormValues } from './DecisionForm'
 import { Result, type RunState } from './Result'
 import { ServerPanel } from './ServerPanel'
 import { useStored, type Selection } from './storage'
 import { useServers } from './useServers'
 
-const EMPTY_FORM: FormValues = { state: '', question: '', candidates: ['', ''] }
+const EMPTY_FORM: FormValues = {
+  kind: 'choice',
+  state: '',
+  question: '',
+  candidates: ['', ''],
+  criteria: { true: '', false: '' },
+}
 
 const host = (url: string) => url.replace(/^https?:\/\//, '')
 
@@ -79,20 +93,77 @@ export default function App() {
   }
 
   function pickExample(example: DecisionExample) {
-    setForm({ state: example.state, question: example.question, candidates: example.candidates })
+    setForm({
+      kind: 'choice',
+      state: example.state,
+      question: example.question,
+      candidates: example.candidates,
+      criteria: { true: '', false: '' },
+    })
     setExpected(example.correct)
     setRun({ status: 'idle' })
   }
 
   async function submit() {
     if (!currentServer || !current) return
-    const candidates = form.candidates.map((c) => c.trim()).filter(Boolean)
     if (!form.state.trim() || !form.question.trim()) {
       setRun({ status: 'error', message: 'Fill in both the state and the question before running.' })
       return
     }
+    if (form.kind === 'noul') {
+      setRun({ status: 'running', n: 2 })
+      try {
+        const criteria: Record<string, string> = {}
+        if (form.criteria.true.trim()) criteria.true = form.criteria.true.trim()
+        if (form.criteria.false.trim()) criteria.false = form.criteria.false.trim()
+        const response = await decideTyped(currentServer.url, {
+          state: form.state,
+          questions: {
+            question: {
+              type: 'noul',
+              instructions: form.question,
+              ...(Object.keys(criteria).length > 0 ? { criteria } : {}),
+            },
+          },
+          model: current.model,
+        })
+        setRun({ status: 'done-typed', latencyMs: response.latency_ms, answer: response.answers.question })
+        void refresh(currentServer)
+      } catch (error) {
+        setRun({ status: 'error', message: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
+    const candidates = form.candidates.map((c) => c.trim()).filter(Boolean)
     if (candidates.length < 2) {
-      setRun({ status: 'error', message: 'At least two non-empty candidates are required.' })
+      setRun({
+        status: 'error',
+        message:
+          form.kind === 'score'
+            ? 'A score needs at least two non-empty levels.'
+            : 'At least two non-empty candidates are required.',
+      })
+      return
+    }
+    if (form.kind === 'score' && candidates.length > 10) {
+      setRun({ status: 'error', message: 'A score accepts at most 10 levels.' })
+      return
+    }
+    if (form.kind === 'score') {
+      setRun({ status: 'running', n: candidates.length })
+      try {
+        const response = await decideTyped(currentServer.url, {
+          state: form.state,
+          questions: {
+            question: { type: 'score', instructions: form.question, criteria: candidates },
+          },
+          model: current.model,
+        })
+        setRun({ status: 'done-typed', latencyMs: response.latency_ms, answer: response.answers.question })
+        void refresh(currentServer)
+      } catch (error) {
+        setRun({ status: 'error', message: error instanceof Error ? error.message : String(error) })
+      }
       return
     }
     setRun({ status: 'running', n: candidates.length })

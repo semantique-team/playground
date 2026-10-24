@@ -1,12 +1,55 @@
-import type { DecisionResponse } from './api'
+import type { DecisionResponse, TypedAnswer } from './api'
 
 export type RunState =
   | { status: 'idle' }
   | { status: 'running'; n: number }
   | { status: 'error'; message: string }
   | { status: 'done'; response: DecisionResponse; expected: string | null }
+  | { status: 'done-typed'; latencyMs: number; answer: TypedAnswer }
 
-const fixed = (value: number | null) => (value == null ? '—' : value.toFixed(3))
+const fixed = (value: number | null | undefined) => (value == null ? '—' : value.toFixed(3))
+
+function Bars({ probabilities, legend }: { probabilities: Record<string, number>; legend?: Record<string, string> }) {
+  const entries = Object.entries(probabilities)
+  const max = Math.max(...entries.map(([, p]) => p))
+  return (
+    <div className="bars">
+      {entries.map(([label, p]) => (
+        <div key={label} className={`bar-row${p === max ? ' winner' : ''}`}>
+          <div>
+            <div className="bar-label">
+              <span>{legend?.[label] ?? label}</span>
+              <span className="bar-value">{(p * 100).toFixed(1)}%</span>
+            </div>
+            <div className="bar-track">
+              <div className="bar-fill" style={{ width: `${p * 100}%` }} />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function TypedResult({ answer, latencyMs }: { answer: TypedAnswer; latencyMs: number }) {
+  return (
+    <>
+      <Bars probabilities={answer.probabilities} legend={answer.legend} />
+      <div className="verdict">
+        <span className="word">
+          {answer.type === 'noul' && `p(yes) = ${fixed(answer.noul)}`}
+          {answer.type === 'score' && `score = ${fixed(answer.score)}`}
+          {answer.type === 'choice' && answer.choice}
+        </span>
+        <span className={`action-badge ${answer.action}`}>{answer.action.toUpperCase()}</span>
+      </div>
+      <div className="confidence-grid">
+        <div><div className="k">confidence</div><div className="v">{fixed(answer.confidence)}</div></div>
+      </div>
+      <p className="latency">{latencyMs.toFixed(1)} ms</p>
+    </>
+  )
+}
 
 export function Result({ run }: { run: RunState }) {
   if (run.status === 'idle') {
@@ -28,27 +71,12 @@ export function Result({ run }: { run: RunState }) {
       </div>
     )
   }
+  if (run.status === 'done-typed') return <TypedResult answer={run.answer} latencyMs={run.latencyMs} />
 
   const { result, latency_ms } = run.response
-  const entries = Object.entries(result.probabilities)
-  const max = Math.max(...entries.map(([, p]) => p))
   return (
     <>
-      <div className="bars">
-        {entries.map(([label, p]) => (
-          <div key={label} className={`bar-row${p === max ? ' winner' : ''}`}>
-            <div>
-              <div className="bar-label">
-                <span>{label}</span>
-                <span className="bar-value">{(p * 100).toFixed(1)}%</span>
-              </div>
-              <div className="bar-track">
-                <div className="bar-fill" style={{ width: `${p * 100}%` }} />
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+      <Bars probabilities={result.probabilities} />
       <div className="verdict">
         <span className="word">{result.choice}</span>
         <span className={`action-badge ${result.action}`}>{result.action.toUpperCase()}</span>

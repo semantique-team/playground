@@ -45,6 +45,38 @@ export interface DecisionBody {
   model: string
 }
 
+/** System One style question kinds, answered by POST /api/typed. */
+export type QuestionKind = 'choice' | 'noul' | 'score'
+
+export interface TypedQuestion {
+  type: QuestionKind
+  instructions: string
+  criteria?: Record<string, string> | string[]
+}
+
+export interface TypedAnswer {
+  type: QuestionKind
+  choice?: string
+  noul?: number
+  score?: number
+  legend?: Record<string, string>
+  probabilities: Record<string, number>
+  confidence: number
+  action: 'execute' | 'escalate'
+}
+
+export interface TypedResponse {
+  answers: Record<string, TypedAnswer>
+  model: string
+  latency_ms: number
+}
+
+export interface TypedBody {
+  state: string
+  questions: Record<string, TypedQuestion>
+  model: string
+}
+
 /** Accepts `localhost:8000`, `http://host:8000/` or `.../api`; returns the bare origin URL. */
 export function normalizeUrl(input: string): string {
   let url = input.trim()
@@ -80,6 +112,14 @@ export async function listExamples(base: string, model: string): Promise<Decisio
 
 export function decide(base: string, body: DecisionBody): Promise<DecisionResponse> {
   return request<DecisionResponse>(`${base}/api/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+export function decideTyped(base: string, body: TypedBody): Promise<TypedResponse> {
+  return request<TypedResponse>(`${base}/api/typed`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
