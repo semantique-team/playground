@@ -67,12 +67,14 @@ class ModelRegistry:
         runs: list[Path],
         *,
         backbone: str | None = None,
+        backend: str = "torch",
         max_loaded: int | None = 1,
     ) -> None:
         names = [run.name for run in runs]
         if len(set(names)) != len(names):
             raise ValueError("run directories must have distinct names")
         self.backbone_override = backbone
+        self.backend = backend
         self.max_loaded = max_loaded
         self._entries: OrderedDict[str, Path] = OrderedDict(zip(names, runs))
         self._loaded: OrderedDict[str, ANTPredictor] = OrderedDict()
@@ -112,7 +114,9 @@ class ModelRegistry:
         if name in self._loaded:
             self._loaded.move_to_end(name)
             return self._loaded[name]
-        predictor = load_predictor(self._entries[name], backbone=self.backbone_override)
+        predictor = load_predictor(
+            self._entries[name], backbone=self.backbone_override, backend=self.backend
+        )
         self._loaded[name] = predictor
         while self.max_loaded is not None and len(self._loaded) > self.max_loaded:
             # the freshly loaded predictor sits last, so eviction frees the
@@ -121,30 +125,62 @@ class ModelRegistry:
         return self._loaded[name]
 
 
-def load_predictor(run: Path, *, backbone: str | None = None, warmup: bool = True) -> ANTPredictor:
+def _build_mlx_backbone(model_id: str, config: ANTConfig):
+    """Apple Silicon MLX backbone; weight quantization is read from the model folder."""
+    from ant.backbone.mlx import MlxBackbone
+
+    quantization = None
+    bits, group_size = 8, 64
+    model_config = Path(model_id) / "config.json"
+    if model_config.is_file():
+        packed = json.loads(model_config.read_text()).get("quantization_config") or {}
+        if packed.get("bits") is not None and packed.get("group_size") is not None:
+            quantization = "mlx"
+            bits = int(packed["bits"])
+            group_size = int(packed["group_size"])
+    return MlxBackbone(
+        model_id,
+        torch_dtype=config.torch_dtype,
+        device="cpu",  # the torch head stays on CPU; MLX runs on Metal internally
+        max_length=config.max_context_tokens,
+        quantization=quantization,
+        quantization_bits=bits,
+        quantization_group_size=group_size,
+    )
+
+
+def load_predictor(
+    run: Path, *, backbone: str | None = None, backend: str = "torch", warmup: bool = True
+) -> ANTPredictor:
     """Load a run directory as a serving-ready predictor.
 
     ``ANTModel.load`` already knows how to rebuild both backbone types: a mock
     backbone from the checkpoint blob itself, or the Qwen checkpoint named in
     config.json. Passing ``backbone`` overrides only the latter, e.g. to serve
-    a head checkpoint from a moved or downloaded backbone directory.
+    a head checkpoint from a moved or downloaded backbone directory. ``backend``
+    selects the inference implementation: ``torch`` (default) or ``mlx`` for
+    Apple Silicon.
     """
     run = Path(run)
     if not (run / "ant_head.pt").exists():
         raise FileNotFoundError(f"no ant_head.pt under {run}")
-    if backbone is not None:
+    if backbone is not None or backend == "mlx":
         config = ANTConfig.load(run / "config.json")
         if config.backbone_model == "mock":
             raise ValueError("backbone override is only valid for real-backbone checkpoints")
-        from ant.backbone.qwen import QwenBackbone
+        model_id = backbone or config.backbone_model
+        if backend == "mlx":
+            qwen = _build_mlx_backbone(model_id, config)
+        else:
+            from ant.backbone.qwen import QwenBackbone
 
-        qwen = QwenBackbone(
-            backbone,
-            torch_dtype=config.torch_dtype,
-            device="auto",  # the saved device is the training machine's, not this one
-            max_length=config.max_context_tokens,
-            attn_implementation=config.attn_implementation,
-        )
+            qwen = QwenBackbone(
+                model_id,
+                torch_dtype=config.torch_dtype,
+                device="auto",  # the saved device is the training machine's, not this one
+                max_length=config.max_context_tokens,
+                attn_implementation=config.attn_implementation,
+            )
         predictor = ANTPredictor.load(run, backbone=qwen, map_location="cpu")
     else:
         predictor = ANTPredictor.load(run, map_location="cpu")
@@ -183,7 +219,11 @@ class HealthResponse(BaseModel):
 
 
 def create_app(
-    runs: Sequence[Path], *, backbone: str | None = None, allow_mock: bool = False
+    runs: Sequence[Path],
+    *,
+    backbone: str | None = None,
+    backend: str = "torch",
+    allow_mock: bool = False,
 ) -> FastAPI:
     """Build the app over one or more checkpoint directories.
 
@@ -191,7 +231,7 @@ def create_app(
     costs); later models load lazily on their first request. Mock-backbone
     checkpoints only exist for tests and are refused unless ``allow_mock``.
     """
-    registry = ModelRegistry([Path(run) for run in runs], backbone=backbone)
+    registry = ModelRegistry([Path(run) for run in runs], backbone=backbone, backend=backend)
     if not registry.names():
         raise ValueError("at least one run directory is required")
     if not allow_mock:

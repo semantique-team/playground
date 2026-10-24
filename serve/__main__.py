@@ -26,6 +26,14 @@ def main() -> None:
         help="Override the Qwen checkpoint path/repoid for real-backbone runs.",
     )
     parser.add_argument(
+        "--backend",
+        choices=("torch", "mlx"),
+        default="torch",
+        help="Inference backend for the frozen Qwen backbone; mlx is the "
+        "Apple Silicon path (pass an --backbone folder converted with "
+        "ant-4b's scripts/mlx_convert.py).",
+    )
+    parser.add_argument(
         "--allow-mock",
         action="store_true",
         help="serve mock-backbone checkpoints (tests/demos only; answers are meaningless)",
@@ -38,7 +46,9 @@ def main() -> None:
     for run in runs:
         if not (run / "config.json").exists():
             parser.error(f"{run} does not look like an ANT checkpoint (no config.json)")
-    app = create_app(runs, backbone=args.backbone, allow_mock=args.allow_mock)
+    app = create_app(
+        runs, backbone=args.backbone, backend=args.backend, allow_mock=args.allow_mock
+    )
     print(f"ANT serving {len(runs)} model(s): {', '.join(r.name for r in runs)}")
     print(f"API: http://{args.host}:{args.port}/api/models  (add this URL in the playground)")
     uvicorn.run(app, host=args.host, port=args.port)
