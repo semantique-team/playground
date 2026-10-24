@@ -14,6 +14,8 @@ This repository contains two independent processes:
 The model package and its checkpoint directories stay in the sibling `ant-4b`
 repository. This keeps the interface deployable without copying model weights.
 
+![Semantique Playground running ANT 4B: a typed yes/no question answered with calibrated probabilities](docs/playground.png)
+
 ## Prerequisites
 
 - Python 3.10 or later
