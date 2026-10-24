@@ -1,0 +1,32 @@
+# The playground is public as a showcase but is not open to external
+# contributions (see CONTRIBUTING.md): close pull requests opened by anyone
+# outside the Semantique Team. Issues are already disabled on the repository.
+name: no-external-prs
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  close:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const allowed = ['OWNER', 'MEMBER', 'COLLABORATOR']
+            const { pull_request: pr } = context.payload
+            if (allowed.includes(pr.author_association)) return
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: pr.number,
+              body: 'This repository is not open to external contributions — see CONTRIBUTING.md. Closing.',
+            })
+            await github.rest.pulls.update({
+              ...context.repo,
+              pull_number: pr.number,
+              state: 'closed',
+            })
